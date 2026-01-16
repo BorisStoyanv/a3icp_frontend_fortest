@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Fireworks Canvas</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+
+<style>
+html, body {
+  margin: 0;
+  padding: 0;
+  background: black;
+  overflow: hidden;
+  font-family: "Gabarito", sans-serif;
+}
+
+canvas {
+  display: block;
+}
+</style>
+</head>
+<body>
+
+<canvas id="c"></canvas>
+
+<script src="https://cdn.jsdelivr.net/npm/simplex-noise@2.4.0/simplex-noise.min.js"></script>
+
+
+<script>
+const canvas = document.getElementById("c");
+const ctx = canvas.getContext("2d");
+
+let width, height, width_half, height_half;
+let lastTime = performance.now();
+let canvasFrameDelta = 16;
+
+function resize() {
+  width = canvas.width = window.innerWidth;
+  height = canvas.height = window.innerHeight;
+  width_half = width * 0.5;
+  height_half = height * 0.5;
+}
+window.addEventListener("resize", resize);
+resize();
+
+const PI = Math.PI;
+const TAU = Math.PI * 2;
+
+function random(a = 1, b) {
+  if (Array.isArray(a)) return a[Math.floor(Math.random() * a.length)];
+  if (b === undefined) return Math.random() * a;
+  return a + Math.random() * (b - a);
+}
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+function hsl(h, s, l, a = 1) {
+  return `hsla(${h},${s}%,${l}%,${a})`;
+}
+
+class Vector {
+  constructor(x = 0, y = 0) {
+    this.x = x;
+    this.y = y;
+  }
+  add(v) { this.x += v.x; this.y += v.y; return this; }
+  sub(v) { this.x -= v.x; this.y -= v.y; return this; }
+  mult(s) { this.x *= s; this.y *= s; return this; }
+  dot(v) { return this.x * v.x + this.y * v.y; }
+  set(x = 0, y = 0) { this.x = x; this.y = y; return this; }
+  rotate(a) {
+    const c = Math.cos(a), s = Math.sin(a);
+    const x = this.x * c - this.y * s;
+    const y = this.x * s + this.y * c;
+    this.x = x; this.y = y;
+    return this;
+  }
+  clone() { return new Vector(this.x, this.y); }
+  get _() { return this.clone(); }
+  static fa(a, m = 1) {
+    return new Vector(Math.cos(a) * m, Math.sin(a) * m);
+  }
+}
+
+function background(c) {
+  ctx.fillStyle = c;
+  ctx.fillRect(0, 0, width, height);
+}
+function beginPath() { ctx.beginPath(); }
+function rect(x, y, s) { ctx.rect(x, y, s, s); }
+function fill(c) { ctx.fillStyle = c; ctx.fill(); }
+
+
+
+const simplex = new SimplexNoise();
+const particles = [];
+let time = 0;
+
+class Particle {
+  constructor() {
+    this.pos = new Vector();
+    this.vel = new Vector();
+    this.acc = new Vector();
+    this.gravity = new Vector(0, 0.02);
+    this.color = "#fff";
+  }
+  update(e, dt) {
+    this.acc.add(this.gravity);
+    this.vel.add(this.acc);
+    this.acc.set(0, 0);
+    this.pos.add(this.vel);
+
+    const noisePos = this.pos._.mult(0.008);
+    const n = simplex.noise3D(noisePos.x, noisePos.y, time);
+    this.pos.add(Vector.fa(n * PI, 0.1));
+  }
+  draw() {
+    beginPath();
+    rect((this.pos.x - 2) | 0, (this.pos.y - 2) | 0, 4);
+    fill(this.color);
+  }
+}
+
+class Firework extends Particle {
+  constructor() {
+    super();
+    this.posPrev = new Vector();
+    this.init();
+  }
+  init() {
+    this.pos.set(random(0.1, 0.9) * width, height);
+    this.vel.set(random(-1, 1), random(0.7, 1) * -7);
+    this.sparkleCount = Math.round(random(18, 48));
+  }
+  update(e, dt) {
+    this.posPrev.set(this.pos.x, this.pos.y);
+    super.update(e, dt);
+
+    if (this.pos.y > height && this.vel.y > 0) this.init();
+    else if (this.pos._.sub(this.posPrev).dot(new Vector(0, 1)) > 0.9) {
+      this.explode();
+      this.init();
+    }
+  }
+  explode() {
+    const shape = random(["random", "circle", "star", "smiley", "heart"]);
+    const scl = random(0.5, 1);
+    const colorBase = random(360);
+    const colorRange = random(60);
+
+    for (let i = 0; i < this.sparkleCount; i++) {
+      const t = i / this.sparkleCount;
+      const T = t * TAU;
+      const p = new Sparkle();
+      p.pos.set(this.pos.x, this.pos.y);
+      p.vel.set(this.vel.x, this.vel.y).mult(0.1);
+
+      p.vel.add(Vector.fa(T, random(0.3, 1)));
+      p.vel.mult(scl);
+
+      const a = hsl(colorBase - colorRange, 100, 50);
+      const b = hsl(colorBase + colorRange, 100, 50);
+      p.color = `color-mix(in oklch, ${a}, ${b} ${Math.sin(t * PI) * 100}%)`;
+
+      particles.push(p);
+    }
+  }
+}
+
+class Sparkle extends Particle {
+  constructor() {
+    super();
+    this.created = performance.now();
+    this.lifetime = random(2000, 2500);
+    this.gravity.set(0, 0.005);
+  }
+  draw(e) {
+    const size = lerp(4, 0, (e - this.created) / this.lifetime);
+    beginPath();
+    rect(this.pos.x - size / 2, this.pos.y - size / 2, size);
+    fill(this.color);
+  }
+}
+
+
+for (let i = 0; i < 20; i++) particles.push(new Firework());
+
+function loop(e) {
+  canvasFrameDelta = e - lastTime;
+  lastTime = e;
+
+  background(hsl(0, 0, 0, 0.1));
+  time = e * 0.001;
+
+  for (let i = particles.length - 1; i >= 0; i--) {
+    const p = particles[i];
+    p.draw(e);
+    p.update(e, canvasFrameDelta);
+    if (p instanceof Sparkle && p.created + p.lifetime < e) {
+      particles.splice(i, 1);
+    }
+  }
+
+  requestAnimationFrame(loop);
+}
+
+requestAnimationFrame(loop);
+</script>
+
+</body>
+</html>
